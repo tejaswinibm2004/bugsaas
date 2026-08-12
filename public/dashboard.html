@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Autonomous Bugfix Control Center</title>
+<link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+  <header class="navbar">
+    <div class="brand-section">
+      <div class="brand-title">🤖 BugShield Autonomous SaaS</div>
+      <div class="nav-links">
+        <a href="http://localhost:5000" target="_blank" class="nav-link">Customer App (Test) ↗</a>
+        <a href="/" class="nav-link">Home</a>
+      </div>
+    </div>
+    <div class="controls-section">
+      <span class="badge" id="mode-badge">Checking...</span>
+      <button class="btn btn-secondary" id="refresh-btn">Refresh</button>
+      <button class="btn btn-danger" id="reset-btn">Reset Demo State</button>
+    </div>
+  </header>
+
+  <section class="stats-bar">
+    <div class="stat-card">
+      <span class="stat-label">Total Reports</span>
+      <span class="stat-value" id="stat-total">0</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Active Pipeline</span>
+      <span class="stat-value" id="stat-active">0</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Patched & Deployed</span>
+      <span class="stat-value" id="stat-deployed" style="color:var(--accent-success);">0</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Needs Attention</span>
+      <span class="stat-value" id="stat-attention" style="color:var(--accent-danger);">0</span>
+    </div>
+  </section>
+
+  <main class="board-container">
+    <div class="board" id="board"></div>
+  </main>
+
+  <script src="/dashboard.js"></script>
+</body>
+</html>

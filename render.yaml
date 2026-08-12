@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: bugsaas
+    env: node
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_OWNER
+        value: tejaswinibm2004
+      - key: GITHUB_REPO
+        value: test
+      - key: GITHUB_BRANCH
+        value: main
+      - key: ENABLE_GITHUB_PUSH
+        value: "true"
+      - key: SITE_TOKEN
+        value: site-token-taskflow-demo

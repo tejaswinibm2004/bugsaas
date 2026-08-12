@@ -1,0 +1,15 @@
+{
+  "name": "bug-saas-platform",
+  "version": "1.0.0",
+  "description": "Autonomous Multi-Agent Bug Resolution SaaS Backend & Control Dashboard",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {}
+}
