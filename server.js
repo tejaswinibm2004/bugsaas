@@ -40,15 +40,22 @@ function initSaaS() {
     fs.writeFileSync(path.join(DATA_DIR, 'reports.json'), '[]');
   }
 
-  // Backup original buggy app.js in Test directory if present
   const targetAppJs = path.join(LOCAL_TEST_DIR, 'app.js');
   if (fs.existsSync(targetAppJs) && !fs.existsSync(BACKUP_FILE)) {
     fs.copyFileSync(targetAppJs, BACKUP_FILE);
   }
 }
 
+function setCorsHeaders(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Site-Token, Authorization, Accept, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
+
 function serveStatic(res, filePath) {
   fs.readFile(filePath, (err, data) => {
+    setCorsHeaders(res);
     if (err) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not found');
@@ -56,7 +63,6 @@ function serveStatic(res, filePath) {
     }
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
-      'Access-Control-Allow-Origin': '*',
     });
     res.end(data);
   });
@@ -82,23 +88,18 @@ function readJsonBody(req) {
 }
 
 function json(res, status, obj) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Site-Token, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  });
+  setCorsHeaders(res);
+  res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(obj));
 }
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Set CORS headers on ALL incoming responses
+    setCorsHeaders(res);
+
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, X-Site-Token, Authorization',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      });
+      res.writeHead(204);
       return res.end();
     }
 
@@ -172,8 +173,8 @@ const server = http.createServer(async (req, res) => {
         githubConfigured: Boolean(process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO),
         githubRepo: `${process.env.GITHUB_OWNER || 'local'}/${process.env.GITHUB_REPO || 'Test'}`,
         models: {
-          agent1: process.env.AGENT1_MODEL || 'openai/gpt-4o-mini',
-          agent2: process.env.AGENT2_MODEL || 'anthropic/claude-sonnet-4.5',
+          agent1: process.env.AGENT1_MODEL || 'meta-llama/llama-3.3-70b-instruct',
+          agent2: process.env.AGENT2_MODEL || 'qwen/qwen-2.5-coder-32b-instruct',
         },
       });
     }
