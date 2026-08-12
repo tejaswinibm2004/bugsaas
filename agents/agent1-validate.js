@@ -1,6 +1,6 @@
 const { callModel, extractJson, isMockMode } = require('../lib/openrouter');
 
-const MODEL = process.env.AGENT1_MODEL || 'openai/gpt-4o-mini';
+const MODEL = process.env.AGENT1_MODEL || 'meta-llama/llama-3.3-70b-instruct';
 
 const SYSTEM_PROMPT = `You are Agent 1 in an automated SaaS production bug-fix pipeline.
 A customer site user submitted a bug report. Technical details (URL, browser, viewport, console stack errors, DOM path, screenshot) were automatically gathered by our embedded widget.
@@ -8,6 +8,11 @@ A customer site user submitted a bug report. Technical details (URL, browser, vi
 Your job:
 1. Determine if this is a valid, actionable software bug report.
 2. Produce a clear, technical bug summary for downstream patch generation.
+
+CRITICAL VALIDATION RULES:
+- ALL software bugs ARE VALID and MUST be accepted: functional bugs, typos, spelling mistakes, text copy errors, UI element misalignments, layout bugs, and visual defects.
+- Mark typos and spelling errors as valid=true with severity="Low".
+- ONLY reject reports if they are obvious spam (e.g., "asdfghjkl", "test test 123", random gibberish) or offensive harassment.
 
 Respond with ONLY a JSON object formatted as follows:
 {
@@ -18,7 +23,7 @@ Respond with ONLY a JSON object formatted as follows:
   "steps_to_reproduce": string[],
   "expected_behavior": string,
   "actual_behavior": string,
-  "suspected_area": string (component, file, or page path),
+  "suspected_area": string (file or component, e.g. "index.html" or "app.js"),
   "severity": "Critical" | "High" | "Medium" | "Low",
   "confidence": number between 0 and 1
 }`;
@@ -26,27 +31,22 @@ Respond with ONLY a JSON object formatted as follows:
 function mockValidate(report) {
   const desc = (report.description || '').trim();
   const lower = desc.toLowerCase();
-  const valid = desc.length >= 8;
+  const valid = desc.length >= 5;
 
   let severity = 'Medium';
-  if (/(color|colour|spacing|typo|minor|small|slightly)/.test(lower)) severity = 'Low';
+  if (/(color|colour|spacing|typo|spelling|text|title|label|heading|minor|small|slightly)/.test(lower)) severity = 'Low';
   if (/(wrong|delete|remove|lost|broken|error|fail|count)/.test(lower)) severity = 'High';
   if (/(crash|everything|always|every time|can'?t use|completely|totally broke)/.test(lower)) severity = 'Critical';
 
   let area = 'app.js';
-  try {
-    if (report.url) {
-      const u = new URL(report.url);
-      area = u.pathname || 'app.js';
-    }
-  } catch (err) {
-    /* ignore */
+  if (/(title|heading|text|typo|spelling|button|html|label)/.test(lower)) {
+    area = 'index.html';
   }
 
   const steps = [
-    `Navigate to ${area}`,
-    `Perform action: ${desc.slice(0, 50)}`,
-    `Observe unexpected failure or error`,
+    `Navigate to customer application`,
+    `Inspect area: ${area}`,
+    `Observe reported behavior: ${desc.slice(0, 60)}`,
   ];
 
   return {
@@ -55,11 +55,11 @@ function mockValidate(report) {
     title: valid ? (desc.length > 55 ? `${desc.slice(0, 52)}...` : desc) : 'Invalid Report',
     description: valid ? desc : desc || 'No detailed description provided.',
     steps_to_reproduce: valid ? steps : [],
-    expected_behavior: 'The requested action should complete correctly without side effects.',
+    expected_behavior: 'The text or functional behavior should be accurate and error-free.',
     actual_behavior: desc,
     suspected_area: area,
     severity,
-    confidence: valid ? 0.85 : 0.2,
+    confidence: valid ? 0.90 : 0.2,
   };
 }
 
