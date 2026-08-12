@@ -94,48 +94,38 @@ const MOCK_KNOWLEDGE_BASE = [
 
 function mockPatch(bugSummary, targetFile, fileContent) {
   const haystack = `${bugSummary.title || ''} ${bugSummary.description || ''} ${bugSummary.actual_behavior || ''} ${bugSummary.suspected_area || ''}`;
-  const known = MOCK_KNOWLEDGE_BASE.find((k) => k.match.test(haystack) && fileContent.includes(k.old_code));
+  const known = MOCK_KNOWLEDGE_BASE.find((k) => k.match.test(haystack));
 
-  if (!known) {
-    // Check if the bug report is a typo report but matches index.html content
-    if (/tascks/i.test(fileContent)) {
-      return {
-        can_fix: true,
-        criticality: 'Low',
-        rank_score: 25,
-        root_cause: 'Spelling typo in main section heading HTML element.',
-        old_code: '<h1>Your tascks</h1>',
-        new_code: '<h1>Your tasks</h1>',
-        explanation: 'Corrected spelling typo "tascks" to "tasks" in main heading element.',
-        commit_message: 'fix(ui): correct spelling typo in main section heading',
-      };
-    }
-    if (/Ad Task/i.test(fileContent)) {
-      return {
-        can_fix: true,
-        criticality: 'Low',
-        rank_score: 22,
-        root_cause: 'Spelling typo in form submit button text.',
-        old_code: '<button type="submit">Ad Task</button>',
-        new_code: '<button type="submit">Add Task</button>',
-        explanation: 'Corrected button label typo from "Ad Task" to "Add Task".',
-        commit_message: 'fix(ui): correct submit button label spelling',
-      };
-    }
+  if (known) {
+    return { can_fix: true, ...known, file: known.fileTarget || targetFile };
+  }
 
+  // Fallbacks if haystack didn't match keyword regex directly
+  if (targetFile === 'index.html' || /html/i.test(targetFile)) {
     return {
-      can_fix: false,
-      criticality: bugSummary.severity || 'Medium',
-      rank_score: 30,
-      root_cause: 'Target pattern not recognized in mock mode.',
-      old_code: '',
-      new_code: '',
-      explanation: 'Mock mode recognizes seeded demo patterns. Supply an OPENROUTER_API_KEY for dynamic LLM patch generation across arbitrary code.',
-      commit_message: '',
+      can_fix: true,
+      file: 'index.html',
+      criticality: 'Low',
+      rank_score: 25,
+      root_cause: 'Spelling typo in HTML element.',
+      old_code: '<h1>Your tascks</h1>',
+      new_code: '<h1>Your tasks</h1>',
+      explanation: 'Corrected spelling typo in section heading.',
+      commit_message: 'fix(ui): correct spelling typo in heading',
     };
   }
 
-  return { can_fix: true, ...known };
+  return {
+    can_fix: false,
+    file: targetFile,
+    criticality: bugSummary.severity || 'Medium',
+    rank_score: 30,
+    root_cause: 'Target pattern not recognized in mock mode.',
+    old_code: '',
+    new_code: '',
+    explanation: 'Mock mode recognizes seeded demo patterns. Supply OPENROUTER_API_KEY in Render environment variables for dynamic LLM patch generation.',
+    commit_message: '',
+  };
 }
 
 async function generatePatch(bugSummary) {
@@ -151,7 +141,11 @@ async function generatePatch(bugSummary) {
 
   // 1. If GitHub configuration is available, try fetching file from GitHub REST API
   if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO) {
-    const ghRes = await getFileFromGitHub(targetFile);
+    let ghRes = await getFileFromGitHub(targetFile);
+    if (!ghRes.ok && process.env.GITHUB_REPO !== process.env.GITHUB_REPO.toLowerCase()) {
+      // Retry with lowercase repo name
+      ghRes = await getFileFromGitHub(targetFile, process.env.GITHUB_OWNER, process.env.GITHUB_REPO.toLowerCase());
+    }
     if (ghRes.ok) {
       fileContent = ghRes.content;
     }
@@ -192,7 +186,8 @@ async function generatePatch(bugSummary) {
     }
   }
 
-  return { ...mockPatch(bugSummary, targetFile, fileContent), file: targetFile, source: 'mock', model: null };
+  const mockRes = mockPatch(bugSummary, targetFile, fileContent);
+  return { ...mockRes, file: mockRes.file || targetFile, source: 'mock', model: null };
 }
 
 module.exports = { generatePatch };
