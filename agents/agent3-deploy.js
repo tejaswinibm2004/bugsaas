@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { commitFileToGitHub } = require('../lib/github');
+const { getFileFromGitHub, commitFileToGitHub } = require('../lib/github');
 
 const LOCAL_TEST_DIR = path.join(__dirname, '..', '..', 'Test');
 
@@ -50,23 +50,38 @@ async function deploy(patch, reportId = 'RELEASE') {
     return { applied: false, reason: 'Invalid patch specification (missing target file).' };
   }
 
-  const localFilePath = path.join(LOCAL_TEST_DIR, patch.file);
   let fileContent = '';
+  let fileSha = null;
 
-  if (fs.existsSync(localFilePath)) {
+  // 1. Primary: Fetch target file content directly from GitHub REST API
+  if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO) {
+    let ghRes = await getFileFromGitHub(patch.file);
+    if (!ghRes.ok && process.env.GITHUB_REPO !== process.env.GITHUB_REPO.toLowerCase()) {
+      ghRes = await getFileFromGitHub(patch.file, process.env.GITHUB_OWNER, process.env.GITHUB_REPO.toLowerCase());
+    }
+    if (ghRes.ok) {
+      fileContent = ghRes.content;
+      fileSha = ghRes.sha;
+    }
+  }
+
+  // 2. Secondary Fallback: Read from local Test directory if available
+  const localFilePath = path.join(LOCAL_TEST_DIR, patch.file);
+  if (!fileContent && fs.existsSync(localFilePath)) {
     fileContent = fs.readFileSync(localFilePath, 'utf8');
   }
 
   if (!fileContent) {
-    return { applied: false, reason: `Target file not found: ${patch.file}` };
+    return { applied: false, reason: `Target file "${patch.file}" could not be retrieved from GitHub API or local workspace.` };
   }
 
+  // 3. Apply patch
   const result = applyFindReplace(fileContent, patch.old_code, patch.new_code);
   if (!result.ok) {
     return { applied: false, reason: result.reason };
   }
 
-  // Syntax check
+  // 4. Validate JS syntax if JS file
   if (patch.file.endsWith('.js')) {
     const syntaxCheck = validateJsSyntax(result.newContent);
     if (!syntaxCheck.ok) {
@@ -74,18 +89,27 @@ async function deploy(patch, reportId = 'RELEASE') {
     }
   }
 
-  // 1. Update local Test directory file if it exists
+  // 5. Update local disk file if present
   if (fs.existsSync(localFilePath)) {
-    fs.writeFileSync(localFilePath, result.newContent, 'utf8');
+    try {
+      fs.writeFileSync(localFilePath, result.newContent, 'utf8');
+    } catch (err) {
+      /* ignore local write error on standalone Render cloud */
+    }
   }
 
   const commitMsg = patch.commit_message || `fix(${patch.file}): automated patch for ${reportId}`;
   const tag = `release-${reportId.toLowerCase()}`;
   let githubCommitRes = null;
 
-  // 2. Commit and Push to GitHub via GitHub API if GITHUB_TOKEN is configured
+  // 6. Commit and Push directly to customer GitHub repo via API
   if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO) {
-    githubCommitRes = await commitFileToGitHub(patch.file, result.newContent, commitMsg);
+    let owner = process.env.GITHUB_OWNER;
+    let repo = process.env.GITHUB_REPO;
+    githubCommitRes = await commitFileToGitHub(patch.file, result.newContent, commitMsg, fileSha, owner, repo);
+    if (!githubCommitRes.ok && repo !== repo.toLowerCase()) {
+      githubCommitRes = await commitFileToGitHub(patch.file, result.newContent, commitMsg, fileSha, owner, repo.toLowerCase());
+    }
   }
 
   return {
