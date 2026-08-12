@@ -9,6 +9,7 @@
   const currentScript = document.currentScript;
   const saasUrl = (currentScript && currentScript.getAttribute('data-saas-url')) || window.location.origin;
   const siteToken = (currentScript && currentScript.getAttribute('data-site-token')) || 'site-token-taskflow-demo';
+  const targetRepo = (currentScript && currentScript.getAttribute('data-repo')) || null;
   const API_ENDPOINT = `${saasUrl.replace(/\/$/, '')}/api/bug-reports`;
 
   const recentErrors = [];
@@ -177,6 +178,7 @@
           description: desc,
           email: email || null,
           url: window.location.href,
+          repo: targetRepo,
           meta: collectMeta(),
           consoleErrors: recentErrors.slice(),
           screenshotName: file ? file.name : null,

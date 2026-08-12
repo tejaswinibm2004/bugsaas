@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { callModel, extractJson, isMockMode } = require('../lib/openrouter');
 const { searchRepoForBug } = require('../lib/repo-search');
-const { getFileFromGitHub } = require('../lib/github');
+const { getFileFromGitHub, resolveRepoForReport } = require('../lib/github');
 
 const MODEL = process.env.AGENT2_MODEL || 'qwen/qwen-2.5-coder-32b-instruct';
 const LOCAL_TEST_DIR = path.join(__dirname, '..', '..', 'Test');
@@ -30,7 +30,6 @@ Rules:
 - If you cannot confidently fix this bug, set can_fix to false and explain why in explanation.`;
 
 const MOCK_KNOWLEDGE_BASE = [
-  // Functional Bug 1: Delete Task
   {
     match: /(delet|remov|wrong task|trash)/i,
     fileTarget: 'app.js',
@@ -42,7 +41,6 @@ const MOCK_KNOWLEDGE_BASE = [
     explanation: 'Updated splice call to use the clicked element index `idx` instead of removing the last array element.',
     commit_message: 'fix(app): delete targeted task by index instead of last item',
   },
-  // Functional Bug 2: Completed Counter
   {
     match: /(count|counter|badge|complete|total|tally)/i,
     fileTarget: 'app.js',
@@ -54,7 +52,6 @@ const MOCK_KNOWLEDGE_BASE = [
     explanation: 'Replaced placeholder false filter with predicate checking `t.done` property.',
     commit_message: 'fix(app): compute completed tasks count dynamically from task done status',
   },
-  // Cosmetic Bug 3: Title Typo ("Your tascks")
   {
     match: /(tascks|title typo|heading typo|header typo|spelling in title)/i,
     fileTarget: 'index.html',
@@ -66,7 +63,6 @@ const MOCK_KNOWLEDGE_BASE = [
     explanation: 'Corrected spelling typo "tascks" to "tasks" in main heading element.',
     commit_message: 'fix(ui): correct spelling typo in main section heading',
   },
-  // Cosmetic Bug 4: Subtitle Typo ("cheking" / "delting")
   {
     match: /(cheking|delting|subtitle typo|description typo)/i,
     fileTarget: 'index.html',
@@ -78,7 +74,6 @@ const MOCK_KNOWLEDGE_BASE = [
     explanation: 'Corrected typos "cheking" and "delting" in subtitle text.',
     commit_message: 'fix(ui): correct typos in page subtitle description',
   },
-  // Cosmetic Bug 5: Button Typo ("Ad Task")
   {
     match: /(ad task|add task|button typo|submit button)/i,
     fileTarget: 'index.html',
@@ -100,7 +95,6 @@ function mockPatch(bugSummary, targetFile, fileContent) {
     return { can_fix: true, ...known, file: known.fileTarget || targetFile };
   }
 
-  // Fallbacks if haystack didn't match keyword regex directly
   if (targetFile === 'index.html' || /html/i.test(targetFile)) {
     return {
       can_fix: true,
@@ -128,24 +122,19 @@ function mockPatch(bugSummary, targetFile, fileContent) {
   };
 }
 
-async function generatePatch(bugSummary) {
+async function generatePatch(bugSummary, report = {}) {
   let targetFile = 'app.js';
-
-  // Determine target file based on bug description or suspected area
   const haystack = `${bugSummary.title || ''} ${bugSummary.description || ''} ${bugSummary.suspected_area || ''}`.toLowerCase();
   if (/(index\.html|html|title|heading|header|typo|spelling|button|subtitle|text|label|tascks|cheking|delting)/.test(haystack)) {
     targetFile = 'index.html';
   }
 
   let fileContent = '';
+  const resolvedRepo = await resolveRepoForReport(report);
 
-  // 1. If GitHub configuration is available, try fetching file from GitHub REST API
-  if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO) {
-    let ghRes = await getFileFromGitHub(targetFile);
-    if (!ghRes.ok && process.env.GITHUB_REPO !== process.env.GITHUB_REPO.toLowerCase()) {
-      // Retry with lowercase repo name
-      ghRes = await getFileFromGitHub(targetFile, process.env.GITHUB_OWNER, process.env.GITHUB_REPO.toLowerCase());
-    }
+  // 1. Fetch file from dynamically resolved GitHub repo
+  if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER) {
+    let ghRes = await getFileFromGitHub(targetFile, process.env.GITHUB_OWNER, resolvedRepo);
     if (ghRes.ok) {
       fileContent = ghRes.content;
     }
@@ -178,7 +167,7 @@ async function generatePatch(bugSummary) {
 
       const parsed = extractJson(content);
       if (parsed && typeof parsed.can_fix === 'boolean') {
-        return { ...parsed, file: targetFile, source: 'llm', model: MODEL };
+        return { ...parsed, file: targetFile, targetRepo: resolvedRepo, source: 'llm', model: MODEL };
       }
       console.error('[agent2] Invalid LLM JSON response, falling back to mock logic.');
     } catch (err) {
@@ -187,7 +176,7 @@ async function generatePatch(bugSummary) {
   }
 
   const mockRes = mockPatch(bugSummary, targetFile, fileContent);
-  return { ...mockRes, file: mockRes.file || targetFile, source: 'mock', model: null };
+  return { ...mockRes, file: mockRes.file || targetFile, targetRepo: resolvedRepo, source: 'mock', model: null };
 }
 
 module.exports = { generatePatch };

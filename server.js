@@ -145,6 +145,7 @@ const server = http.createServer(async (req, res) => {
         description,
         email: body.email || null,
         url: body.url || null,
+        repo: body.repo || null,
         meta: body.meta || {},
         consoleErrors: Array.isArray(body.consoleErrors) ? body.consoleErrors.slice(0, 10) : [],
         screenshotName: body.screenshotName || null,

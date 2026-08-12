@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { getFileFromGitHub, commitFileToGitHub } = require('../lib/github');
+const { getFileFromGitHub, commitFileToGitHub, resolveRepoForReport } = require('../lib/github');
 
 const LOCAL_TEST_DIR = path.join(__dirname, '..', '..', 'Test');
 
@@ -45,20 +45,18 @@ function validateJsSyntax(code) {
   }
 }
 
-async function deploy(patch, reportId = 'RELEASE') {
+async function deploy(patch, reportId = 'RELEASE', report = {}) {
   if (!patch || !patch.file) {
     return { applied: false, reason: 'Invalid patch specification (missing target file).' };
   }
 
+  const targetRepo = patch.targetRepo || await resolveRepoForReport(report);
   let fileContent = '';
   let fileSha = null;
 
-  // 1. Primary: Fetch target file content directly from GitHub REST API
-  if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO) {
-    let ghRes = await getFileFromGitHub(patch.file);
-    if (!ghRes.ok && process.env.GITHUB_REPO !== process.env.GITHUB_REPO.toLowerCase()) {
-      ghRes = await getFileFromGitHub(patch.file, process.env.GITHUB_OWNER, process.env.GITHUB_REPO.toLowerCase());
-    }
+  // 1. Fetch target file content dynamically from GitHub REST API
+  if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER) {
+    let ghRes = await getFileFromGitHub(patch.file, process.env.GITHUB_OWNER, targetRepo);
     if (ghRes.ok) {
       fileContent = ghRes.content;
       fileSha = ghRes.sha;
@@ -72,7 +70,7 @@ async function deploy(patch, reportId = 'RELEASE') {
   }
 
   if (!fileContent) {
-    return { applied: false, reason: `Target file "${patch.file}" could not be retrieved from GitHub API or local workspace.` };
+    return { applied: false, reason: `Target file "${patch.file}" could not be retrieved from GitHub repository "${targetRepo}".` };
   }
 
   // 3. Apply patch
@@ -94,7 +92,7 @@ async function deploy(patch, reportId = 'RELEASE') {
     try {
       fs.writeFileSync(localFilePath, result.newContent, 'utf8');
     } catch (err) {
-      /* ignore local write error on standalone Render cloud */
+      /* ignore */
     }
   }
 
@@ -102,24 +100,21 @@ async function deploy(patch, reportId = 'RELEASE') {
   const tag = `release-${reportId.toLowerCase()}`;
   let githubCommitRes = null;
 
-  // 6. Commit and Push directly to customer GitHub repo via API
-  if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO) {
+  // 6. Commit and Push dynamically to target GitHub repo via API
+  if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER) {
     let owner = process.env.GITHUB_OWNER;
-    let repo = process.env.GITHUB_REPO;
-    githubCommitRes = await commitFileToGitHub(patch.file, result.newContent, commitMsg, fileSha, owner, repo);
-    if (!githubCommitRes.ok && repo !== repo.toLowerCase()) {
-      githubCommitRes = await commitFileToGitHub(patch.file, result.newContent, commitMsg, fileSha, owner, repo.toLowerCase());
-    }
+    githubCommitRes = await commitFileToGitHub(patch.file, result.newContent, commitMsg, fileSha, owner, targetRepo);
   }
 
   return {
     applied: true,
     file: patch.file,
+    targetRepo,
     commitHash: githubCommitRes && githubCommitRes.ok ? githubCommitRes.commitSha : 'local-commit',
     commitMessage: commitMsg,
     tag,
     pushed: githubCommitRes ? githubCommitRes.ok : false,
-    pushLog: githubCommitRes ? (githubCommitRes.ok ? `Pushed to GitHub: ${githubCommitRes.commitUrl}` : githubCommitRes.error) : 'Local sync applied',
+    pushLog: githubCommitRes ? (githubCommitRes.ok ? `Pushed to GitHub repo "${targetRepo}": ${githubCommitRes.commitUrl}` : githubCommitRes.error) : 'Local sync applied',
     deployedAt: new Date().toISOString(),
   };
 }
