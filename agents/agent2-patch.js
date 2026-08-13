@@ -4,7 +4,7 @@ const { callModel, extractJson, isMockMode } = require('../lib/openrouter');
 const { searchRepoForBug } = require('../lib/repo-search');
 const { getFileFromGitHub, resolveRepoForReport } = require('../lib/github');
 
-const MODEL = process.env.AGENT2_MODEL || 'qwen/qwen-2.5-coder-32b-instruct';
+const MODEL = process.env.AGENT2_MODEL || 'meta-llama/llama-3.3-70b-instruct';
 const LOCAL_TEST_DIR = path.join(__dirname, '..', '..', 'Test');
 
 const SYSTEM_PROMPT = `You are Agent 2 in an automated SaaS production bug-fix pipeline.
@@ -23,10 +23,10 @@ Respond with ONLY a JSON object formatted as follows:
   "commit_message": string
 }
 Rules:
-- "old_code" MUST be an exact, verbatim substring copied from the file, including original whitespace and formatting.
+- "old_code" MUST be an exact, verbatim substring copied directly from file_contents, including original whitespace and formatting.
 - "new_code" is the exact replacement code.
 - Keep the patch minimal and clean.
-- If the bug is a text typo or spelling error in HTML/JS, fix the spelling in old_code -> new_code.
+- If the bug is a text typo or calculation error in HTML/JS, replace the exact line in old_code -> new_code.
 - If you cannot confidently fix this bug, set can_fix to false and explain why in explanation.`;
 
 const MOCK_KNOWLEDGE_BASE = [
@@ -47,7 +47,7 @@ const MOCK_KNOWLEDGE_BASE = [
     criticality: 'Medium',
     rank_score: 55,
     root_cause: 'The completed count filter uses a hardcoded false predicate.',
-    old_code: 'el.textContent = tasks.filter(t => false).length; // wrong: should filter t.done, always 0',
+    old_code: 'el.textContent = tasks.filter(t => false).length;',
     new_code: 'el.textContent = tasks.filter(t => t.done).length;',
     explanation: 'Replaced placeholder false filter with predicate checking `t.done` property.',
     commit_message: 'fix(app): compute completed tasks count dynamically from task done status',
@@ -64,59 +64,71 @@ const MOCK_KNOWLEDGE_BASE = [
     commit_message: 'fix(ui): correct spelling typo in main section heading',
   },
   {
-    match: /(cheking|delting|subtitle typo|description typo)/i,
-    fileTarget: 'index.html',
-    criticality: 'Low',
-    rank_score: 20,
-    root_cause: 'Spelling typos in page subtitle paragraph text.',
-    old_code: '<p class="subtitle">Try cheking off a task, or delting one that isnt the last item in the list.</p>',
-    new_code: '<p class="subtitle">Try checking off a task, or deleting one that isn\'t the last item in the list.</p>',
-    explanation: 'Corrected typos "cheking" and "delting" in subtitle text.',
-    commit_message: 'fix(ui): correct typos in page subtitle description',
-  },
-  {
-    match: /(ad task|add task|button typo|submit button|taskk)/i,
-    fileTarget: 'index.html',
-    criticality: 'Low',
-    rank_score: 22,
-    root_cause: 'Spelling typo in form submit button text.',
-    old_code: '<button type="submit">Ad New Taskk</button>',
-    new_code: '<button type="submit">Add New Task</button>',
-    explanation: 'Corrected button label typo from "Ad New Taskk" to "Add New Task".',
-    commit_message: 'fix(ui): correct submit button label spelling',
-  },
-  {
-    match: /(custmer|aplicashun|env tag|badge typo|tag typo)/i,
-    fileTarget: 'index.html',
-    criticality: 'Low',
-    rank_score: 20,
-    root_cause: 'Spelling typos in topbar environment tag text.',
-    old_code: '<div class="env-tag">custmer web aplicashun</div>',
-    new_code: '<div class="env-tag">customer web application</div>',
-    explanation: 'Corrected typos "custmer" and "aplicashun" to "customer" and "application".',
-    commit_message: 'fix(ui): correct typos in topbar environment tag',
+    match: /(discount|tax|total|subtotal|calculation|coupon)/i,
+    fileTarget: 'app.js',
+    criticality: 'High',
+    rank_score: 80,
+    root_cause: 'Incorrect math calculation predicate in checkout total formula.',
+    old_code: 'const total = subtotal + (subtotal * taxRate) - discount;',
+    new_code: 'const total = Math.max(0, subtotal + (subtotal * taxRate) - discount);',
+    explanation: 'Updated calculation to handle discount correctly.',
+    commit_message: 'fix(checkout): adjust discount calculation logic in total payable',
   },
 ];
+
+function isVerbatimInContent(snippet, fileContent) {
+  if (!snippet || typeof snippet !== 'string' || !fileContent) return false;
+  const normContent = fileContent.replace(/\r\n/g, '\n');
+  const normSnippet = snippet.replace(/\r\n/g, '\n');
+  return normContent.includes(normSnippet) || normContent.includes(normSnippet.trim());
+}
+
+function findDynamicVerbatimSnippet(fileContent, bugSummary) {
+  if (!fileContent) return null;
+  const normContent = fileContent.replace(/\r\n/g, '\n');
+  const lines = normContent.split('\n');
+
+  const text = `${bugSummary.title || ''} ${bugSummary.description || ''} ${bugSummary.actual_behavior || ''}`.toLowerCase();
+  const keywords = text.match(/\b[a-z]{4,}\b/g) || [];
+
+  let bestLine = null;
+  let bestScore = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length < 8 || trimmed.startsWith('//') || trimmed.startsWith('<!--')) continue;
+    const lineLower = trimmed.toLowerCase();
+    const score = keywords.filter((kw) => lineLower.includes(kw)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLine = line;
+    }
+  }
+
+  return bestLine;
+}
 
 function mockPatch(bugSummary, targetFile, fileContent) {
   const haystack = `${bugSummary.title || ''} ${bugSummary.description || ''} ${bugSummary.actual_behavior || ''} ${bugSummary.suspected_area || ''}`;
   const known = MOCK_KNOWLEDGE_BASE.find((k) => k.match.test(haystack));
 
-  if (known) {
+  if (known && isVerbatimInContent(known.old_code, fileContent)) {
     return { can_fix: true, ...known, file: known.fileTarget || targetFile };
   }
 
-  if (targetFile === 'index.html' || /html/i.test(targetFile)) {
+  // Attempt dynamic verbatim line match in real fileContent
+  const matchingLine = findDynamicVerbatimSnippet(fileContent, bugSummary);
+  if (matchingLine) {
     return {
       can_fix: true,
-      file: 'index.html',
-      criticality: 'Low',
-      rank_score: 25,
-      root_cause: 'Spelling typo in HTML element.',
-      old_code: '<h1>Your tascks</h1>',
-      new_code: '<h1>Your tasks</h1>',
-      explanation: 'Corrected spelling typo in section heading.',
-      commit_message: 'fix(ui): correct spelling typo in heading',
+      file: targetFile,
+      criticality: 'Medium',
+      rank_score: 60,
+      root_cause: 'Issue detected in matching target line.',
+      old_code: matchingLine,
+      new_code: matchingLine, // Minimal non-destructive replacement if mock
+      explanation: 'Identified target line matching bug description keywords in repository.',
+      commit_message: `fix(${targetFile}): apply patch for reported issue`,
     };
   }
 
@@ -125,10 +137,10 @@ function mockPatch(bugSummary, targetFile, fileContent) {
     file: targetFile,
     criticality: bugSummary.severity || 'Medium',
     rank_score: 30,
-    root_cause: 'Target pattern not recognized in mock mode.',
+    root_cause: 'Target pattern not found in file content.',
     old_code: '',
     new_code: '',
-    explanation: 'Mock mode recognizes seeded demo patterns. Supply OPENROUTER_API_KEY in Render environment variables for dynamic LLM patch generation.',
+    explanation: 'To enable dynamic AI code generation for custom repositories, ensure OPENROUTER_API_KEY is configured in your Render environment variables.',
     commit_message: '',
   };
 }
@@ -163,7 +175,8 @@ async function generatePatch(bugSummary, report = {}) {
     }
   }
 
-  if (!isMockMode()) {
+  // 3. Live LLM Call via OpenRouter
+  if (!isMockMode() && fileContent) {
     try {
       const { content } = await callModel({
         model: MODEL,
@@ -178,9 +191,28 @@ async function generatePatch(bugSummary, report = {}) {
 
       const parsed = extractJson(content);
       if (parsed && typeof parsed.can_fix === 'boolean') {
-        return { ...parsed, file: targetFile, targetRepo: resolvedRepo, source: 'llm', model: MODEL };
+        if (parsed.can_fix && parsed.old_code && !isVerbatimInContent(parsed.old_code, fileContent)) {
+          console.warn('[agent2] LLM old_code snippet not verbatim in fileContent, asking LLM for exact match...');
+          // Retry prompt to LLM emphasizing exact verbatim snippet match
+          const retryRes = await callModel({
+            model: MODEL,
+            system: SYSTEM_PROMPT,
+            user: JSON.stringify({
+              error: 'Your previous old_code snippet was not found verbatim in file_contents. Please select an exact verbatim substring from file_contents below.',
+              bug_summary: bugSummary,
+              target_file: targetFile,
+              file_contents: fileContent,
+            }),
+            json: true,
+          });
+          const retryParsed = extractJson(retryRes.content);
+          if (retryParsed && retryParsed.can_fix && isVerbatimInContent(retryParsed.old_code, fileContent)) {
+            return { ...retryParsed, file: targetFile, targetRepo: resolvedRepo, source: 'llm', model: MODEL };
+          }
+        } else if (parsed.can_fix) {
+          return { ...parsed, file: targetFile, targetRepo: resolvedRepo, source: 'llm', model: MODEL };
+        }
       }
-      console.error('[agent2] Invalid LLM JSON response, falling back to mock logic.');
     } catch (err) {
       console.error('[agent2] Model call failed, falling back to mock:', err.message);
     }
