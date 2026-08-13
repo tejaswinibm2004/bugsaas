@@ -36,10 +36,6 @@ function initSaaS() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-  if (!fs.existsSync(path.join(DATA_DIR, 'reports.json'))) {
-    fs.writeFileSync(path.join(DATA_DIR, 'reports.json'), '[]');
-  }
-
   const targetAppJs = path.join(LOCAL_TEST_DIR, 'app.js');
   if (fs.existsSync(targetAppJs) && !fs.existsSync(BACKUP_FILE)) {
     fs.copyFileSync(targetAppJs, BACKUP_FILE);
@@ -226,6 +222,7 @@ server.listen(PORT, () => {
   console.log(`   • Dashboard:   http://localhost:${PORT}/dashboard.html`);
   console.log(`   • Widget CDN:  http://localhost:${PORT}/widget.js`);
   console.log(`   • Intake API:  http://localhost:${PORT}/api/bug-reports`);
+  console.log(`   • Database:    SQLite (data/bugsaas.db)`);
   console.log(`   • Mode:        ${isMockMode() ? 'MOCK MODE' : 'LIVE (OpenRouter)'}`);
   console.log(`================================================================\n`);
 });
