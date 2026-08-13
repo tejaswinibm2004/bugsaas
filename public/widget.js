@@ -218,4 +218,22 @@
   }
 
   launcher.addEventListener('click', openModal);
+
+  function attachCustomTriggers() {
+    const selector = '#reportBugBtn, #reportOrderIssueBtn, .report-bug-btn, [data-bug-report]';
+    const targets = document.querySelectorAll(selector);
+    targets.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openModal();
+      });
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attachCustomTriggers);
+  } else {
+    attachCustomTriggers();
+  }
 })();
