@@ -101,20 +101,45 @@ async function deploy(patch, reportId = 'RELEASE', report = {}) {
   let githubCommitRes = null;
 
   // 6. Commit and Push dynamically to target GitHub repo via API
-  if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER) {
-    let owner = process.env.GITHUB_OWNER;
+  const githubConfigured = Boolean(process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER);
+  const pushEnabled = process.env.ENABLE_GITHUB_PUSH !== 'false'; // enabled unless explicitly disabled
+  const pushAttempted = githubConfigured && pushEnabled;
+
+  if (pushAttempted) {
+    const owner = process.env.GITHUB_OWNER;
     githubCommitRes = await commitFileToGitHub(patch.file, result.newContent, commitMsg, fileSha, owner, targetRepo);
+    if (!githubCommitRes.ok) {
+      console.error(`[agent3-deploy] GitHub push failed for "${patch.file}" in ${owner}/${targetRepo}: ${githubCommitRes.error}`);
+    }
+  } else if (githubConfigured && !pushEnabled) {
+    console.warn(`[agent3-deploy] GitHub push skipped for "${patch.file}" — ENABLE_GITHUB_PUSH is set to "false".`);
+  } else {
+    console.warn(`[agent3-deploy] GitHub push skipped for "${patch.file}" — GITHUB_TOKEN and/or GITHUB_OWNER not configured.`);
+  }
+
+  const pushed = pushAttempted ? Boolean(githubCommitRes && githubCommitRes.ok) : false;
+
+  let pushLog;
+  if (pushAttempted) {
+    pushLog = githubCommitRes.ok
+      ? `Pushed to GitHub repo "${targetRepo}": ${githubCommitRes.commitUrl}`
+      : `GitHub push failed: ${githubCommitRes.error}`;
+  } else if (githubConfigured && !pushEnabled) {
+    pushLog = 'GitHub push disabled via ENABLE_GITHUB_PUSH=false. Local sync applied only.';
+  } else {
+    pushLog = 'GitHub not configured (missing GITHUB_TOKEN/GITHUB_OWNER). Local sync applied only.';
   }
 
   return {
     applied: true,
     file: patch.file,
     targetRepo,
-    commitHash: githubCommitRes && githubCommitRes.ok ? githubCommitRes.commitSha : 'local-commit',
+    commitHash: pushed ? githubCommitRes.commitSha : 'local-commit',
     commitMessage: commitMsg,
     tag,
-    pushed: githubCommitRes ? githubCommitRes.ok : false,
-    pushLog: githubCommitRes ? (githubCommitRes.ok ? `Pushed to GitHub repo "${targetRepo}": ${githubCommitRes.commitUrl}` : githubCommitRes.error) : 'Local sync applied',
+    pushAttempted,
+    pushed,
+    pushLog,
     deployedAt: new Date().toISOString(),
   };
 }
