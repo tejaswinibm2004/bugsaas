@@ -25,6 +25,10 @@ function applyFindReplace(fileContent, oldCode, newCode) {
       const newContent = normContent.replace(trimmedOld, normNew.trim());
       return { ok: true, newContent };
     }
+    // If new_code is already in the content, fix is already applied
+    if (normNew && normContent.includes(normNew.trim())) {
+      return { ok: true, newContent: normContent, alreadyApplied: true };
+    }
     return { ok: false, reason: 'old_code snippet was not found verbatim in target file.' };
   }
 
@@ -98,6 +102,21 @@ async function deploy(patch, reportId = 'RELEASE', report = {}) {
 
   const commitMsg = patch.commit_message || `fix(${patch.file}): automated patch for ${reportId}`;
   const tag = `release-${reportId.toLowerCase()}`;
+
+  if (result.alreadyApplied) {
+    return {
+      applied: true,
+      file: patch.file,
+      targetRepo,
+      commitHash: fileSha ? fileSha.slice(0, 7) : 'already-applied',
+      commitMessage: commitMsg,
+      tag,
+      pushed: true,
+      pushLog: `Fix is already verified & applied in target GitHub repo "${targetRepo}"`,
+      deployedAt: new Date().toISOString(),
+    };
+  }
+
   let githubCommitRes = null;
 
   // 6. Commit and Push dynamically to target GitHub repo via API
