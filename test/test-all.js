@@ -32,24 +32,25 @@ async function runAllTests() {
   process.env.DB_DRIVER = 'sqlite';
   const sqliteStore = require('../lib/store');
 
+  const testId = `BUG-SQLITE-TEST-${Date.now()}`;
   await test('SQLite - Create Bug Report', async () => {
     const report = await sqliteStore.create({
-      id: 'BUG-SQLITE-TEST-1',
+      id: testId,
       description: 'SQLite test bug report description',
       status: 'new',
       createdAt: new Date().toISOString(),
     });
-    assert.strictEqual(report.id, 'BUG-SQLITE-TEST-1');
+    assert.strictEqual(report.id, testId);
   })();
 
   await test('SQLite - Fetch Report by ID', async () => {
-    const fetched = await sqliteStore.getById('BUG-SQLITE-TEST-1');
-    assert.strictEqual(fetched.id, 'BUG-SQLITE-TEST-1');
+    const fetched = await sqliteStore.getById(testId);
+    assert.strictEqual(fetched.id, testId);
     assert.strictEqual(fetched.description, 'SQLite test bug report description');
   })();
 
   await test('SQLite - Update Report Status', async () => {
-    const updated = await sqliteStore.update('BUG-SQLITE-TEST-1', (r) => ({ ...r, status: 'validated' }));
+    const updated = await sqliteStore.update(testId, (r) => ({ ...r, status: 'validated' }));
     assert.strictEqual(updated.status, 'validated');
   })();
 

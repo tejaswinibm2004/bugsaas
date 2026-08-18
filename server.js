@@ -32,13 +32,18 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-function initSaaS() {
+async function initSaaS() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
   const targetAppJs = path.join(LOCAL_TEST_DIR, 'app.js');
   if (fs.existsSync(targetAppJs) && !fs.existsSync(BACKUP_FILE)) {
     fs.copyFileSync(targetAppJs, BACKUP_FILE);
+  }
+
+  if (store.getDriver() === 'firestore') {
+    const firestoreDb = require('./lib/firestoreDb');
+    await firestoreDb.syncFromSqliteIfEmpty();
   }
 }
 
@@ -217,15 +222,17 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-initSaaS();
-server.listen(PORT, () => {
-  const dbDriverName = store.getDriver() === 'firestore' ? 'Cloud Firestore (reports collection)' : 'SQLite (data/bugsaas.db)';
-  console.log(`\n================================================================`);
-  console.log(`🚀 Bug_SaaS Autonomous Platform Running on http://localhost:${PORT}`);
-  console.log(`   • Dashboard:   http://localhost:${PORT}/dashboard.html`);
-  console.log(`   • Widget CDN:  http://localhost:${PORT}/widget.js`);
-  console.log(`   • Intake API:  http://localhost:${PORT}/api/bug-reports`);
-  console.log(`   • Database:    ${dbDriverName}`);
-  console.log(`   • Mode:        ${isMockMode() ? 'MOCK MODE' : 'LIVE (OpenRouter)'}`);
-  console.log(`================================================================\n`);
-});
+(async () => {
+  await initSaaS();
+  server.listen(PORT, () => {
+    const dbDriverName = store.getDriver() === 'firestore' ? 'Cloud Firestore (reports collection)' : 'SQLite (data/bugsaas.db)';
+    console.log(`\n================================================================`);
+    console.log(`🚀 Bug_SaaS Autonomous Platform Running on http://localhost:${PORT}`);
+    console.log(`   • Dashboard:   http://localhost:${PORT}/dashboard.html`);
+    console.log(`   • Widget CDN:  http://localhost:${PORT}/widget.js`);
+    console.log(`   • Intake API:  http://localhost:${PORT}/api/bug-reports`);
+    console.log(`   • Database:    ${dbDriverName}`);
+    console.log(`   • Mode:        ${isMockMode() ? 'MOCK MODE' : 'LIVE (OpenRouter)'}`);
+    console.log(`================================================================\n`);
+  });
+})();
