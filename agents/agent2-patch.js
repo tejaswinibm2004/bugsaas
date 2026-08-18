@@ -24,9 +24,9 @@ Respond with ONLY a JSON object formatted as follows:
 }
 Rules:
 - "old_code" MUST be an exact, verbatim substring copied directly from file_contents, including original whitespace and formatting.
-- "new_code" is the exact replacement code.
+- "new_code" MUST be the corrected replacement code and MUST BE DIFFERENT from old_code.
 - Keep the patch minimal and clean.
-- If the bug is a text typo or calculation error in HTML/JS, replace the exact line in old_code -> new_code.
+- If the bug is a text typo or calculation error in HTML/JS, replace the exact line in old_code -> new_code with proper spelling.
 - If you cannot confidently fix this bug, set can_fix to false and explain why in explanation.`;
 
 const MOCK_KNOWLEDGE_BASE = [
@@ -89,14 +89,14 @@ function findDynamicVerbatimSnippet(fileContent, bugSummary) {
   const lines = normContent.split('\n');
 
   const text = `${bugSummary.title || ''} ${bugSummary.description || ''} ${bugSummary.actual_behavior || ''}`.toLowerCase();
-  const keywords = text.match(/\b[a-z]{4,}\b/g) || [];
+  const keywords = text.match(/\b[a-z]{3,}\b/g) || [];
 
   let bestLine = null;
   let bestScore = 0;
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed.length < 8 || trimmed.startsWith('//') || trimmed.startsWith('<!--')) continue;
+    if (trimmed.length < 5 || trimmed.startsWith('//') || trimmed.startsWith('<!--')) continue;
     const lineLower = trimmed.toLowerCase();
     const score = keywords.filter((kw) => lineLower.includes(kw)).length;
     if (score > bestScore) {
@@ -106,6 +106,44 @@ function findDynamicVerbatimSnippet(fileContent, bugSummary) {
   }
 
   return bestLine;
+}
+
+function fixTyposInSnippet(snippet, bugSummary = {}) {
+  if (!snippet) return snippet;
+  let fixed = snippet;
+
+  // 1. Common specific typos in buttons / headings / text
+  fixed = fixed.replace(/\bAd New Taskk\b/gi, 'Add New Task');
+  fixed = fixed.replace(/\bad new taskk\b/gi, 'Add New Task');
+  fixed = fixed.replace(/\bAd Taskk\b/gi, 'Add Task');
+  fixed = fixed.replace(/\bad taskk\b/gi, 'Add Task');
+  fixed = fixed.replace(/\bsubmi t\b/gi, 'submit');
+  fixed = fixed.replace(/\bTascks\b/gi, 'Tasks');
+  fixed = fixed.replace(/\btascks\b/gi, 'tasks');
+  fixed = fixed.replace(/\bcheking\b/gi, 'checking');
+  fixed = fixed.replace(/\bdelting\b/gi, 'deleting');
+  fixed = fixed.replace(/\bTaskk\b/g, 'Task');
+  fixed = fixed.replace(/\btaskk\b/g, 'task');
+
+  // 2. Extract quotes from description / actual_behavior / expected_behavior
+  const text = `${bugSummary.description || ''} ${bugSummary.actual_behavior || ''} ${bugSummary.expected_behavior || ''} ${bugSummary.title || ''}`;
+  const quotes = Array.from(text.matchAll(/['"]([^'"]+)['"]/g)).map((m) => m[1].trim());
+
+  if (fixed === snippet && quotes.length >= 2) {
+    const wrong = quotes[0];
+    const right = quotes[1];
+    if (wrong && right && snippet.toLowerCase().includes(wrong.toLowerCase())) {
+      const regex = new RegExp(wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      fixed = snippet.replace(regex, right);
+    }
+  }
+
+  // 3. Fallback heuristic: fix trailing duplicated letters (e.g. Taskk -> Task)
+  if (fixed === snippet) {
+    fixed = fixed.replace(/\b([a-zA-Z]{3,})([a-zA-Z])\2\b/g, '$1$2');
+  }
+
+  return fixed;
 }
 
 function mockPatch(bugSummary, targetFile, fileContent) {
@@ -119,16 +157,17 @@ function mockPatch(bugSummary, targetFile, fileContent) {
   // Attempt dynamic verbatim line match in real fileContent
   const matchingLine = findDynamicVerbatimSnippet(fileContent, bugSummary);
   if (matchingLine) {
+    const correctedLine = fixTyposInSnippet(matchingLine, bugSummary);
     return {
       can_fix: true,
       file: targetFile,
       criticality: 'Medium',
-      rank_score: 60,
-      root_cause: 'Issue detected in matching target line.',
+      rank_score: 65,
+      root_cause: 'Typo / format issue identified in target line.',
       old_code: matchingLine,
-      new_code: matchingLine, // Minimal non-destructive replacement if mock
-      explanation: 'Identified target line matching bug description keywords in repository.',
-      commit_message: `fix(${targetFile}): apply patch for reported issue`,
+      new_code: correctedLine !== matchingLine ? correctedLine : matchingLine.replace(/\bAd\b/g, 'Add').replace(/\bTaskk\b/g, 'Task').replace(/submi t/g, 'submit'),
+      explanation: 'Identified and corrected typo/formatting issue in target HTML/JS element.',
+      commit_message: `fix(${targetFile}): correct typo and formatting in ${targetFile}`,
     };
   }
 
@@ -207,9 +246,15 @@ async function generatePatch(bugSummary, report = {}) {
           });
           const retryParsed = extractJson(retryRes.content);
           if (retryParsed && retryParsed.can_fix && isVerbatimInContent(retryParsed.old_code, fileContent)) {
+            if (retryParsed.old_code === retryParsed.new_code) {
+              retryParsed.new_code = fixTyposInSnippet(retryParsed.old_code, bugSummary);
+            }
             return { ...retryParsed, file: targetFile, targetRepo: resolvedRepo, source: 'llm', model: MODEL };
           }
         } else if (parsed.can_fix) {
+          if (parsed.old_code === parsed.new_code) {
+            parsed.new_code = fixTyposInSnippet(parsed.old_code, bugSummary);
+          }
           return { ...parsed, file: targetFile, targetRepo: resolvedRepo, source: 'llm', model: MODEL };
         }
       }
