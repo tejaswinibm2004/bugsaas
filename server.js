@@ -150,17 +150,19 @@ const server = http.createServer(async (req, res) => {
         createdAt: new Date().toISOString(),
       };
 
-      store.create(report);
+      await store.create(report);
       runPipeline(id).catch((err) => console.error('[pipeline] unhandled error:', err));
       return json(res, 201, { id, status: 'submitted' });
     }
 
     if (pathname === '/api/reports' && req.method === 'GET') {
-      return json(res, 200, store.getAll());
+      const reports = await store.getAll();
+      return json(res, 200, reports);
     }
 
     if (pathname === '/api/stats' && req.method === 'GET') {
-      return json(res, 200, store.getStats());
+      const stats = await store.getStats();
+      return json(res, 200, stats);
     }
 
     if (pathname === '/api/config' && req.method === 'GET') {
@@ -191,7 +193,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/reset' && req.method === 'POST') {
-      store.reset();
+      await store.reset();
       const targetAppJs = path.join(LOCAL_TEST_DIR, 'app.js');
       if (fs.existsSync(BACKUP_FILE)) {
         fs.copyFileSync(BACKUP_FILE, targetAppJs);
@@ -217,12 +219,13 @@ const server = http.createServer(async (req, res) => {
 
 initSaaS();
 server.listen(PORT, () => {
+  const dbDriverName = store.getDriver() === 'firestore' ? 'Cloud Firestore (reports collection)' : 'SQLite (data/bugsaas.db)';
   console.log(`\n================================================================`);
   console.log(`🚀 Bug_SaaS Autonomous Platform Running on http://localhost:${PORT}`);
   console.log(`   • Dashboard:   http://localhost:${PORT}/dashboard.html`);
   console.log(`   • Widget CDN:  http://localhost:${PORT}/widget.js`);
   console.log(`   • Intake API:  http://localhost:${PORT}/api/bug-reports`);
-  console.log(`   • Database:    SQLite (data/bugsaas.db)`);
+  console.log(`   • Database:    ${dbDriverName}`);
   console.log(`   • Mode:        ${isMockMode() ? 'MOCK MODE' : 'LIVE (OpenRouter)'}`);
   console.log(`================================================================\n`);
 });

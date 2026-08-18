@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Lock down client access by default. Server operations via firebase-admin SDK bypass security rules.
+    match /reports/{reportId} {
+      allow read, write: if false;
+    }
+  }
+}

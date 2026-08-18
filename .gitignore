@@ -2,6 +2,9 @@
 .env
 .env.local
 .env.*.local
+serviceAccountKey.json
+*.json.key
+
 
 # Dependencies
 node_modules/
